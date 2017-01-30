@@ -53,7 +53,9 @@ spherical manifold description but then, before integrating, switch it out
 ```
 
 Here is a plot of the cellwise L-oo norm with `MappingQ`:
+
 <img src="./mapping-q.png" width="500"\>
 
 and with `MappingQ1`:
+
 <img src="./mapping-q1.png" width="500"\>
