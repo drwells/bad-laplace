@@ -41,7 +41,7 @@ constexpr int fe_degree {4};
 constexpr types::manifold_id circular_manifold_id {0};
 constexpr types::manifold_id straight_manifold_id {dealii::numbers::flat_manifold_id};
 
-constexpr types::boundary_id circle_boundary_id {2};
+constexpr types::boundary_id circular_boundary_id {2};
 
 // laziness
 constexpr double pi = M_PI;
@@ -55,13 +55,14 @@ public:
                        const unsigned int) const override
   {
     static_assert(dim == 2, "only available in 2D");
-    const double x = point[0];
-    const double y = point[1];
+    // const double x = point[0];
+    // const double y = point[1];
 
-    return (Utilities::fixed_power<3>(y) + std::exp(-Utilities::fixed_power<2>(y))
-            + std::sin(4.5*Utilities::fixed_power<2>(y))
-            + std::sin(20*y))*(20*std::cos(4*pi*x) + 0.1*std::sin(20*pi*x)
-                               - 80*std::sin(6*pi*x));
+    // return (Utilities::fixed_power<3>(y) + std::exp(-Utilities::fixed_power<2>(y))
+    //         + std::sin(4.5*Utilities::fixed_power<2>(y))
+    //         + std::sin(20*y))*(20*std::cos(4*pi*x) + 0.1*std::sin(20*pi*x)
+    //                            - 80*std::sin(6*pi*x));
+    return point[0] * point[1];
   }
 };
 
@@ -76,44 +77,38 @@ public:
   {
     static_assert(dim == 2, "not implemented for dim != 2");
 
-    const double x = point[0];
-    const double y = point[1];
+    // const double x = point[0];
+    // const double y = point[1];
 
-    return -40.0*(Utilities::fixed_power<3>(y) + std::exp(-Utilities::fixed_power<2>(y))
-                  + std::sin(4.5*Utilities::fixed_power<2>(y))
-                  + std::sin(20*y))*(-8.0*pi*pi*std::cos(4*pi*x)
-                                     - 1.0*pi*pi*std::sin(20*pi*x)
-                                     + 72.0*pi*pi*std::sin(6*pi*x))
-      - (4*Utilities::fixed_power<2>(y)*std::exp(-Utilities::fixed_power<2>(y))
-         - 81.0*Utilities::fixed_power<2>(y)*std::sin(4.5*Utilities::fixed_power<2>(y))
-         + 6*y + 9.0*std::cos(4.5*Utilities::fixed_power<2>(y))
-         - 2*std::exp(-Utilities::fixed_power<2>(y)) - 400*std::sin(20*y))
-      *(20*std::cos(4*pi*x) + 0.1*std::sin(20*pi*x) - 80*std::sin(6*pi*x));
+    // return -40.0*(Utilities::fixed_power<3>(y) + std::exp(-Utilities::fixed_power<2>(y))
+    //               + std::sin(4.5*Utilities::fixed_power<2>(y))
+    //               + std::sin(20*y))*(-8.0*pi*pi*std::cos(4*pi*x)
+    //                                  - 1.0*pi*pi*std::sin(20*pi*x)
+    //                                  + 72.0*pi*pi*std::sin(6*pi*x))
+    //   - (4*Utilities::fixed_power<2>(y)*std::exp(-Utilities::fixed_power<2>(y))
+    //      - 81.0*Utilities::fixed_power<2>(y)*std::sin(4.5*Utilities::fixed_power<2>(y))
+    //      + 6*y + 9.0*std::cos(4.5*Utilities::fixed_power<2>(y))
+    //      - 2*std::exp(-Utilities::fixed_power<2>(y)) - 400*std::sin(20*y))
+    //   *(20*std::cos(4*pi*x) + 0.1*std::sin(20*pi*x) - 80*std::sin(6*pi*x));
+    return 0.0;
   }
 };
 
 
 
-
 template <int dim>
 std::unique_ptr<Manifold<dim>>
-ladutenko_circle(Triangulation<dim> &triangulation,
-                 const Point<dim>    center = Point<dim>(),
-                 const double        radius = 1.0)
+circle_12(Triangulation<dim> &triangulation,
+          const Point<dim>    center = Point<dim>(),
+          const double        radius = 1.0)
 {
   std::unique_ptr<Manifold<dim>> boundary(new SphericalManifold<dim>(center));
   GridGenerator::hyper_ball(triangulation, center, radius);
-  triangulation.set_all_manifold_ids_on_boundary(circular_manifold_id);
+  triangulation.set_all_manifold_ids(circular_manifold_id);
   triangulation.set_manifold(circular_manifold_id, *boundary);
 
-  const double core_radius  = 1.0/4.8*radius;
-  const double inner_radius = 1.0/2.4*radius;
+  const double core_radius  = 3.0/4.8*radius;
 
-  // Step 1: Shrink the inner cell
-  // and
-  // Step 2: set the central cell to have a straight manifold
-  // and
-  // Step 3: Refine all cells except the central one
   for (auto cell : triangulation.active_cell_iterators())
     {
       if (cell->center().distance(center) < 1e-10)
@@ -125,40 +120,33 @@ ladutenko_circle(Triangulation<dim> &triangulation,
               cell->vertex(vertex_n) *= core_radius
                 /center.distance (cell->vertex(vertex_n));
             }
+          cell->set_all_manifold_ids(straight_manifold_id);
         }
-      else
-        {
-          cell->set_refine_flag ();
-        }
-    }
-  triangulation.execute_coarsening_and_refinement ();
 
-  // Step 4: Resize the inner children of the outer cells
-  // and
-  // Step 5: Refine the outer loop
-  for (auto cell : triangulation.active_cell_iterators())
-    {
-      for (unsigned int v=0; v < GeometryInfo<dim>::vertices_per_cell; ++v)
+      for (unsigned int face_n = 0;
+           face_n < GeometryInfo<dim>::faces_per_cell;
+           ++face_n)
         {
-          const double dist = center.distance (cell->vertex(v));
-          if (dist > core_radius*1.0001 && dist < radius - 1.0e-5)
-            cell->vertex(v) *= inner_radius/dist;
-        }
-      if (cell->at_boundary())
-        {
-          cell->set_refine_flag ();
+          if (cell->face(face_n)->at_boundary())
+            {
+              cell->face(face_n)->set_boundary_id(circular_boundary_id);
+            }
         }
     }
+
+  // split some cells anisotropically
+  auto parent = triangulation.begin(0); // bottom
+  parent->set_refine_flag(RefinementCase<dim>::cut_axis(0));
+  ++parent; // left
+  parent->set_refine_flag(RefinementCase<dim>::cut_axis(1));
+  ++parent; // center
+  parent->set_refine_flag();
+  ++parent; // right
+  parent->set_refine_flag(RefinementCase<dim>::cut_axis(0));
+  ++parent; // top
+  parent->set_refine_flag(RefinementCase<dim>::cut_axis(1));
+
   triangulation.execute_coarsening_and_refinement();
-
-  // Step 6: curve all boundary cells
-  for (auto cell : triangulation.active_cell_iterators())
-    {
-      if (cell->at_boundary())
-        {
-          cell->set_all_manifold_ids(circular_manifold_id);
-        }
-    }
 
   return boundary;
 }
@@ -185,7 +173,7 @@ protected:
   FE_Q<dim> finite_element;
   DoFHandler<dim> dof_handler;
   QGauss<dim> cell_quadrature;
-  MappingQ<dim> mapping;
+  MappingQGeneric<dim> mapping;
 
   ConstraintMatrix constraints;
   SparsityPattern sparsity_pattern;
@@ -209,31 +197,32 @@ BadLaplace<dim>::BadLaplace(const unsigned int n_global_refines) :
   cell_quadrature(fe_degree + 1),
   mapping(fe_degree)
 {
-  boundary_manifold = ladutenko_circle(triangulation);
-  triangulation.refine_global(n_global_refines);
+  boundary_manifold = circle_12(triangulation);
 
+  triangulation.set_all_manifold_ids(straight_manifold_id);
   for (auto cell : triangulation.active_cell_iterators())
     {
-      for (unsigned int face_n = 0;
-           face_n < GeometryInfo<dim>::faces_per_cell;
-           ++face_n)
+      if (cell->at_boundary())
         {
-          if (cell->face(face_n)->at_boundary())
+          for (unsigned int face_n = 0;
+               face_n < GeometryInfo<dim>::faces_per_cell;
+               ++face_n)
             {
-              cell->face(face_n)->set_boundary_id(circle_boundary_id);
+              if (cell->face(face_n)->at_boundary())
+                {
+                  cell->face(face_n)->set_boundary_id(circular_boundary_id);
+                  cell->face(face_n)->set_manifold_id(circular_manifold_id);
+                }
             }
         }
     }
 
-  // this part causes trouble: redo the manifolds after refining the grid
-  triangulation.set_all_manifold_ids(straight_manifold_id);
-  triangulation.set_all_manifold_ids_on_boundary(circular_manifold_id);
+  triangulation.refine_global(n_global_refines);
 
   dof_handler.distribute_dofs(finite_element);
-
   VectorTools::interpolate_boundary_values(mapping,
                                            dof_handler,
-                                           circle_boundary_id,
+                                           circular_boundary_id,
                                            *manufactured_solution,
                                            constraints);
   DoFTools::make_hanging_node_constraints(dof_handler, constraints);
@@ -394,7 +383,7 @@ void BadLaplace<dim>::save_grid()
 
 int main(int argc, char **argv)
 {
-  Utilities::MPI::MPI_InitFinalize mpi_initialization(argc, argv);
+  Utilities::MPI::MPI_InitFinalize mpi_initialization(argc, argv, 1);
 
   constexpr int dim {2};
 
