@@ -8,7 +8,6 @@
 #include <deal.II/dofs/dof_tools.h>
 
 #include <deal.II/fe/mapping_q.h>
-#include <deal.II/fe/mapping_q_generic.h>
 #include <deal.II/fe/mapping_q1.h>
 #include <deal.II/fe/fe_q.h>
 
@@ -40,7 +39,7 @@
 
 using namespace dealii;
 
-constexpr int fe_degree {4};
+constexpr int fe_degree {5};
 constexpr types::manifold_id circular_manifold_id {0};
 constexpr types::manifold_id straight_manifold_id {dealii::numbers::flat_manifold_id};
 
@@ -51,7 +50,7 @@ constexpr double pi = M_PI;
 constexpr double signal_nan {std::numeric_limits<double>::signaling_NaN()};
 
 template <int dim>
-class HardManufacturedSolution2 : public Function<dim>
+class HardManufacturedSolution : public Function<dim>
 {
 public:
   virtual double value(const Point<dim> &point,
@@ -66,7 +65,7 @@ public:
 
 
 template <int dim>
-class HardManufacturedForcing2 : public Function<dim>
+class HardManufacturedForcing : public Function<dim>
 {
 public:
   virtual double value(const Point<dim> &point,
@@ -117,21 +116,21 @@ protected:
 template <int dim>
 BadLaplace<dim>::BadLaplace(const unsigned int n_global_refines) :
   n_global_refines {n_global_refines},
-  manufactured_solution {new HardManufacturedSolution2<dim>()},
-  manufactured_forcing {new HardManufacturedForcing2<dim>()},
+  manufactured_solution {new HardManufacturedSolution<dim>()},
+  manufactured_forcing {new HardManufacturedForcing<dim>()},
   boundary_manifold {new SphericalManifold<dim>()},
   finite_element(fe_degree),
   dof_handler(triangulation),
   cell_quadrature(fe_degree + 1),
   mapping(fe_degree)
 {
-  GridIn<dim> grid_in;
-  grid_in.attach_triangulation(triangulation);
-  std::ifstream input_file("circle-grid.inp");
-  grid_in.read_ucd(input_file);
-  triangulation.set_all_manifold_ids_on_boundary(circular_manifold_id);
+  GridGenerator::hyper_shell(triangulation, Point<dim>(), 1.0, 2.0);
+  triangulation.set_all_manifold_ids(circular_manifold_id);
   triangulation.set_manifold(circular_manifold_id, *boundary_manifold);
   triangulation.refine_global(n_global_refines);
+
+  triangulation.set_all_manifold_ids(straight_manifold_id);
+  triangulation.set_all_manifold_ids_on_boundary(circular_manifold_id);
 
   for (auto cell : triangulation.active_cell_iterators())
     {
@@ -202,6 +201,12 @@ void BadLaplace<dim>::setup_matrices()
                   cell_system(test_n, trial_n) += fe_values.JxW(q_point_n)*
                     (fe_values.shape_grad(test_n, q_point_n)
                      *fe_values.shape_grad(trial_n, q_point_n));
+                  // The projection also fails to converge at the correct
+                  // rate. To see this, set the manufactured solution equal to
+                  // the exact solution.
+                  // cell_system(test_n, trial_n) += fe_values.JxW(q_point_n)*
+                  //   (fe_values.shape_value(test_n, q_point_n)
+                  //    *fe_values.shape_value(trial_n, q_point_n));
                 }
 
               cell_rhs[test_n] += fe_values.JxW(q_point_n)
@@ -249,10 +254,14 @@ double BadLaplace<dim>::solve()
                                       VectorTools::NormType::L2_norm);
   }
 
-  const double l2_error = VectorTools::compute_global_error
-    (triangulation, cell_l2_error, VectorTools::NormType::L2_norm);
+  std::sort(cell_l2_error.begin(), cell_l2_error.end());
+  double l2_error = 0.0;
+  for (const double value : cell_l2_error)
+    {
+      l2_error += value*value;
+    }
 
-  return l2_error;
+  return std::sqrt(l2_error);
 }
 
 
@@ -290,16 +299,18 @@ void BadLaplace<dim>::save_grid()
 
     for (double &entry : cell_linfty_error)
       {
-        entry = std::log10(entry);
+        entry = std::log10(entry + 1.0e-16);
       }
     data_out.add_data_vector(cell_linfty_error, "log10_of_Linf_error");
   }
 
   data_out.build_patches();
   DataOutBase::VtkFlags vtk_flags;
+#if DEAL_II_VERSION_GTE(8, 4, 0)
   vtk_flags.compression_level = DataOutBase::VtkFlags::ZlibCompressionLevel::best_speed;
+#endif
   data_out.set_flags(vtk_flags);
-  std::ofstream output("grid-" + Utilities::to_string(dof_handler.n_dofs()) + ".vtu");
+  std::ofstream output("grid-" + Utilities::int_to_string(dof_handler.n_dofs()) + ".vtu");
   data_out.write_vtu(output);
 }
 
